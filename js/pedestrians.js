@@ -5,18 +5,8 @@
 var c = document.getElementById("screen");
 var ctx = c.getContext("2d");
 
-ctx.lineTo(0,0);
-ctx.moveTo(-200,-200);
-ctx.stroke();
-
 var walkerImage = new Image();
 walkerImage.src = "sprites/pedestrian.png";
-
-//var img = new Image();
-//img.src = "sprites/pedestrian.png";
-//img.onload = function() {
-//	ctx.drawImage(img, 10, 10);	
-//};
 
 var range = function(low, high) {
     var thisRange = [];
@@ -26,11 +16,20 @@ var range = function(low, high) {
     return thisRange;
 }
 
-var spriteSize = 16;
+var makeCounter = function() {
+    var c = 0;
+    return function() {
+        return c++;
+    }
+}
 
+var makeID = makeCounter();
+
+var spriteSize = 16;
 var startingY = 340;
 var leftLaneX = 160;
 var rightLaneX = 177;
+var arrivals = 0; //Number of pedestrians having made it to the train
 
 var pedestrians = []; //Active pedestrians
 var waitingLine = []; //Pedestrians waiting to start
@@ -40,14 +39,21 @@ var clearScreen = function() {
     ctx.clearRect(0, 0, 1000, 1000);
 }
 
-var getBox = function(x, y, side) {
+var getRect = function(x, y, xSide, ySide) {
     var box = [];
-    for (var i = x; i < (x + side); i++) {
-        for (var j = y; j < (y + side); j++) {
-            box.push([i, j]);
-        }
+    for (var i = x; i < (x + xSide); i++) {
+        box.push([i, (y + 1)]);
+        box.push([i, (y + ySide - 1)]);
+    }     
+    for (var i = y; i < (y + ySide); i++) {
+        box.push([x, i]);
+        box.push([x + ySide, i]);
     } 
     return box;   
+}
+
+var getBox = function(x, y, side) {
+    return getRect(x, y, side, side);
 }
 
 var coordsCompare = function(coords1, coords2) {
@@ -65,54 +71,37 @@ var boxCompare = function(box1, box2) {
     return false;    
 }
 
-var boxOverlap = function(x1, y1, x2, y2, side) {
-    var box1 = getBox(x1, y1, side);
-    var box2 = getBox(x2, y2, side);
-    return boxCompare(box1, box2); 
-}
-
-var boxContain = function(boxX, boxY, queryX, queryY, side) {
-    var box = [];
-    for (var i = boxX; i < (boxX + side); i++) {
-        for (var j = boxY; j < (boxY + side); j++) {
-            box1.push([i, j]);
-        }
-    }    
-    for (var i = 0; i < box.length; i++) {
-        if (coordsCompare(box[i], [queryX, queryY])) {
-            return true;
-        }
-    }
-    return false;
-}
-
-var checkBox = function(box) {
+var checkBox = function(box, id) {
     for (i = 0; i < pedestrians.length; i++) {
-        var thisBox = getBox(pedestrians[i].x, pedestrians[i].y, spriteSize);
+        var x, y, thisBox;
+        x = Math.floor(pedestrians[i].x);
+        y = Math.floor(pedestrians[i].y);
+        thisBox = getBox(x, y, spriteSize);
         if (boxCompare(thisBox, box)) {
-            return pedestrians[i].actualSpeed;
+            if (pedestrians[i].id !== id) { return pedestrians[i].actualSpeed; }           
         }
     }
     return false;   
 }
 
-var checkFront = function(x, y) {
-    frontBox = getBox(x, (y - 2), 2);
-    return checkBox(frontBox);
+var checkFront = function(x, y, id) {
+    frontBox = getRect(x, (y - 3), spriteSize, 3);
+    return checkBox(frontBox, id);
 }
 
-var openPass = function(x, y) {
-    return (!checkBox(x, y) && !(checkBox(x, (y + spriteSize))));
+var openPass = function(x, y, id) {
+    return (!checkBox(x, y, id) && !(checkBox(x, (y - spriteSize), id)));
 }
 
-var getOppositeX = function(left) {
-    if (left === 0) {
+var getOppositeX = function(side) {
+    if (side === "right") {
         return leftLaneX;
     } else { return rightLaneX; }
 }
 
-var Pedestrian = function(x, y, speed) {
-	this.left = (x === leftLaneX) ? 1 : 0;
+var Pedestrian = function(x, y, speed, id) {
+    this.id = id;
+	this.side = (x === leftLaneX) ? "left" : "right";
     this.x = x;
 	this.y = y;
     this.blocked = 0;
@@ -129,52 +118,69 @@ var Pedestrian = function(x, y, speed) {
         ctx.drawImage(this.img, this.x, this.y);
     }
     this.checkZone = function() {
-        var newSpeed = checkFront(this.x, this.y);
+        var checkX, checkY, newSpeed;
+        checkX = Math.floor(this.x);
+        checkY = Math.floor(this.y);
+        newSpeed = checkFront(checkX, checkY, this.id);
         if (newSpeed) { 
             this.blocked = 1;
             this.actualSpeed = Math.min(newSpeed, this.actualSpeed); 
         } else { this.blocked = 0; }
     }
     this.pass = function() {
-        if (openPass(getOppositeX(this.left), this.y)) {
-            this.passSpeed = (this.left === 0) ? this.actualSpeed : (0 - this.actualSpeed);
+        if (openPass(getOppositeX(this.side), this.y, this.id)) {
+            this.passSpeed = (this.side === "right") ? this.actualSpeed : (0 - this.actualSpeed);
             this.passing = 1;
             this.walk();
         } else { this.passSpeed = 0; }
     }
     this.endPass = function() {
+        var checkX, checkY, newSpeed;
+        checkX = Math.floor(this.x);
+        checkY = Math.floor(this.y);
+        newSpeed = checkFront(checkX, checkY, this.id);
+        if (newSpeed) {
+            this.passSpeed = 0;
+            this.actualSpeed = newSpeed; 
+        }
         if (this.x < leftLaneX) {
             this.passSpeed = 0;
             this.x = leftLaneX;
             this.actualSpeed = this.desiredSpeed;
             this.passing = 0;
-            this.left = 1;
+            this.side = "left";
         } else if (this.x > rightLaneX) {
             this.passSpeed = 0;
             this.x = rightLaneX;
             this.actualSpeed = this.desiredSpeed; 
             this.passing = 0;
-            this.left = 0;  
+            this.side = "right";  
         }
+    }
+    this.checkArrive = function() {
+        if (this.y < -18) { arrivals++; }
     }
 }
 
 var generatePedestrian = function() {
-    var x, y, speed;
+    var x, y, speed, id;
     x = ((Math.random() * 2) < 1) ? leftLaneX : rightLaneX;
     y = startingY;
     speed = 0.1 + (Math.random() * 1);   
-    if (checkBox(x, startingY)) {
-        pedestrians.push(new Pedestrian(x, y, speed));
+    id = makeID();
+    console.log(id);
+    if (!checkBox(x, startingY, 0.1) && (!checkBox(x, startingY - 8, 0.1))) {
+        pedestrians.push(new Pedestrian(x, y, speed, id));
     }
     else {
-        waitingLine.push(new Pedestrian(x, y, speed));
+        waitingLine.push(new Pedestrian(x, y, speed, id));
+        console.log("Waiting!");
     }
 }
 
 var nextInLine = function() {
     if (waitingLine[0] !== undefined) {
-        if (!checkBox(waitingLine[0].x, startingY))
+        if (!checkBox(waitingLine[0].x, startingY, waitingLine[0].id) && !checkBox(waitingLine[0].x, startingY - 8, waitingLine[0].id))
             pedestrians.push(waitingLine.shift());
     }
 }
@@ -197,33 +203,45 @@ var rollAgainst = function(target) {
 
 var render = function() {
     for (var i = 0; i < pedestrians.length; i++) {
-        pedestrians[i].checkZone();
-        if (pedestrians[i].blocked === 1) {
-            pedestrians[i].pass();
+        if (pedestrians[i].y > -18) {
+            pedestrians[i].checkZone();
+            // if (pedestrians[i].blocked === 1) {
+            //     pedestrians[i].pass();
+            // }
+            // if (pedestrians[i].passing === 1) {
+            //     pedestrians[i].endPass();
+            // }
+            pedestrians[i].walk();
+            pedestrians[i].draw();
+            pedestrians[i].checkArrive();
         }
-        if (pedestrians[i].passing === 1) {
-            pedestrians[i].endPass();
-        }
-        pedestrians[i].walk();
-        pedestrians[i].draw();
     }
     drawLanes();
 }
 
 // The main game loop
 var lastTime;
+var startTrial = Date.now();
 function main() {
     var now = Date.now();
     var dt = (now - lastTime) / 1000.0;
 
-   // update(dt);
+    // update(dt);
     render();
 
-    if (rollAgainst(1)) { generatePedestrian(); }
+    if (rollAgainst(2)) { generatePedestrian(); }
     nextInLine();
 
     lastTime = now;
-    requestAnimationFrame(main);
+    
+    if (arrivals < 100) { 
+        requestAnimationFrame(main);
+    } else {
+        var elapsed = Date.now() - startTrial;
+        var minutes = Math.floor(elapsed / 60000);
+        var seconds = Math.floor(elapsed / 1000) - (minutes * 60000);
+        console.log("The trial took " + minutes + " minutes and " + seconds + " seconds!");
+    }
 };
 
 walkerImage.onload = function() {
